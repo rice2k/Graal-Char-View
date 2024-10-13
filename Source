@@ -1,0 +1,235 @@
+//Not Completed 
+
+import os
+from tkinter import filedialog, Tk, Label, Button, Scrollbar, Canvas, Frame, StringVar, PhotoImage, Toplevel
+from tkinter import messagebox
+from tkinter.ttk import Progressbar
+from PIL import Image, ImageTk
+import threading
+
+# Dictionary to cache loaded images for performance
+image_cache = {}
+items_per_page = 20  # Number of images to load per page
+current_page = 0  # Pagination state
+category_images = []
+
+# Function to dynamically calculate image size and grid layout based on window width
+def update_image_grid():
+    if folder_path.get():
+        # Clear previous images
+        for widget in scrollable_frame.winfo_children():
+            widget.destroy()
+
+        window_width = root.winfo_width()
+        cols = max(1, window_width // 40)  # Adjust number of columns based on window width (min 1 column)
+        img_size = window_width // cols - 8  # Adjust image size to fit within the columns
+
+        # Create progress bar
+        progress_win = Toplevel(root)
+        progress_win.title("Loading Images...")
+        progress_win.geometry("300x100")
+        progress = Progressbar(progress_win, orient="horizontal", length=200, mode="determinate")
+        progress.pack(pady=20)
+        progress_label = Label(progress_win, text="Loading images...")
+        progress_label.pack(pady=5)
+
+        # Update images in background using thread
+        threading.Thread(target=load_images_in_background, args=(img_size, cols, progress, progress_win)).start()
+
+def load_images_in_background(img_size, cols, progress, progress_win):
+    global current_page, category_images
+
+    # Paginate images
+    paginated_images = category_images[current_page * items_per_page:(current_page + 1) * items_per_page]
+    total_images = len(paginated_images)
+
+    for idx, img_file in enumerate(paginated_images):
+        img_path = os.path.join(folder_path.get(), img_file)
+        
+        # Use cached image if available, otherwise load and resize
+        if img_path in image_cache:
+            img_tk = image_cache[img_path]
+        else:
+            image = Image.open(img_path)
+            image = image.resize((img_size, img_size))  # Dynamically resize image
+            img_tk = ImageTk.PhotoImage(image)
+            image_cache[img_path] = img_tk  # Cache resized image
+
+        # Create label for each image
+        label = Label(scrollable_frame, image=img_tk)
+        label.image = img_tk  # Store reference to avoid garbage collection
+        label.grid(row=idx // cols, column=idx % cols, padx=5, pady=5)
+
+        # Bind left-click to the label to show the selected item
+        label.bind("<Button-1>", lambda e, path=img_path: on_item_selected(path))
+
+        # Update progress bar
+        progress['value'] = (idx + 1) * 100 / total_images
+        progress.update_idletasks()
+
+    # Close the progress window after loading
+    progress_win.destroy()
+
+    # Update pagination controls (Next/Previous buttons)
+    update_pagination_controls()
+
+# Function to handle item selection
+def on_item_selected(image_path):
+    messagebox.showinfo("Selected Item", f"Selected item: {image_path}")
+
+# Function to load images from the selected folder
+def load_images():
+    global category_images, current_page
+    folder = folder_path.get()
+    if folder:
+        category_images = [f for f in os.listdir(folder) if f.endswith(('.png', '.gif', '.jpg'))]
+        current_page = 0  # Reset pagination
+        total_items_label.config(text=f"Total Items: {len(category_images)}")  # Update total items label
+        update_image_grid()
+
+# Function to open folder dialog
+def select_folder():
+    folder = filedialog.askdirectory()  # Open folder selection dialog
+    if folder:
+        folder_path.set(folder)
+        load_images()
+
+# Function to switch between categories (Heads, Bodies, Shields, Swords)
+def switch_category(category):
+    category_label.config(text=f"Viewing: {category}")
+    folder_path.set("")  # Reset the folder path
+    image_cache.clear()  # Clear the cache for new category
+    total_items_label.config(text="Total Items: 0")  # Reset total items count
+    load_images()  # Load new category
+
+# Load button icon images from file (ensure these image files exist)
+def load_icons():
+    icons = {
+        "Heads": "icons/heads_icon.png",
+        "Bodies": "icons/bodies_icon.png",
+        "Shields": "icons/shields_icon.png",
+        "Swords": "icons/swords_icon.png",
+    }
+    
+    loaded_icons = {}
+    for category, icon_path in icons.items():
+        if os.path.exists(icon_path):
+            img = Image.open(icon_path)
+            img = img.resize((32, 32))  # Resize icon to fit on button
+            loaded_icons[category] = ImageTk.PhotoImage(img)
+        else:
+            print(f"Icon for {category} not found at {icon_path}")
+    
+    return loaded_icons
+
+# Pagination navigation functions
+def next_page():
+    global current_page
+    if (current_page + 1) * items_per_page < len(category_images):
+        current_page += 1
+        update_image_grid()
+
+def previous_page():
+    global current_page
+    if current_page > 0:
+        current_page -= 1
+        update_image_grid()
+
+# Update pagination controls
+def update_pagination_controls():
+    btn_next.config(state="normal" if (current_page + 1) * items_per_page < len(category_images) else "disabled")
+    btn_prev.config(state="normal" if current_page > 0 else "disabled")
+
+# Create main application window
+root = Tk()
+root.title("Graal Char Viewer")
+root.geometry("600x550")
+
+# Create a label for the category being viewed
+category_label = Label(root, text="Viewing: Heads", font=("Arial", 14))
+category_label.pack(pady=10)
+
+# Create a label to show the total number of items in the folder
+total_items_label = Label(root, text="Total Items: 0", font=("Arial", 12))
+total_items_label.pack(pady=5)
+
+# Load icons for category buttons
+icons = load_icons()
+
+# Create buttons for selecting the category (Heads, Bodies, Shields, Swords) with icons and tooltips
+buttons_frame = Frame(root)
+buttons_frame.pack(pady=5)
+
+# Add tooltips to buttons
+def create_tooltip(widget, text):
+    tooltip = Label(root, text=text, bg="yellow", fg="black", relief="solid", borderwidth=1)
+    tooltip.place_forget()
+
+    def show_tooltip(event):
+        tooltip.place(x=event.x_root, y=event.y_root)
+
+    def hide_tooltip(event):
+        tooltip.place_forget()
+
+    widget.bind("<Enter>", show_tooltip)
+    widget.bind("<Leave>", hide_tooltip)
+
+# Create category buttons with tooltips
+btn_heads = Button(buttons_frame, text="Heads", width=80, image=icons.get("Heads"), compound="left", command=lambda: switch_category("Heads"))
+btn_heads.grid(row=0, column=0, padx=5)
+create_tooltip(btn_heads, "View Head Images")
+
+btn_bodies = Button(buttons_frame, text="Bodies", width=80, image=icons.get("Bodies"), compound="left", command=lambda: switch_category("Bodies"))
+btn_bodies.grid(row=0, column=1, padx=5)
+create_tooltip(btn_bodies, "View Body Images")
+
+btn_shields = Button(buttons_frame, text="Shields", width=80, image=icons.get("Shields"), compound="left", command=lambda: switch_category("Shields"))
+btn_shields.grid(row=0, column=2, padx=5)
+create_tooltip(btn_shields, "View Shield Images")
+
+btn_swords = Button(buttons_frame, text="Swords", width=80, image=icons.get("Swords"), compound="left", command=lambda: switch_category("Swords"))
+btn_swords.grid(row=0, column=3, padx=5)
+create_tooltip(btn_swords, "View Sword Images")
+
+# Path configuration for selected folder
+path_frame = Frame(root)
+path_frame.pack(pady=10)
+
+folder_path = StringVar()
+
+# Create a button to select the folder for the current category
+btn_select_folder = Button(path_frame, text="Select Folder", command=select_folder)
+btn_select_folder.grid(row=0, column=1, padx=10)
+
+# Display the selected folder path
+folder_label = Label(path_frame, textvariable=folder_path, width=40)
+folder_label.grid(row=0, column=0)
+
+# Create a canvas with a scrollable frame for images
+canvas = Canvas(root, height=400, width=450)
+scrollbar = Scrollbar(root, orient="vertical", command=canvas.yview)
+scrollable_frame = Frame(canvas)
+
+scrollable_frame.bind(
+    "<Configure>",
+    lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+)
+
+canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+canvas.configure(yscrollcommand=scrollbar.set)
+
+canvas.pack(side="left", fill="both", expand=True)
+scrollbar.pack(side="right", fill="y")
+
+# Pagination control buttons (Next/Previous)
+pagination_frame = Frame(root)
+pagination_frame.pack(pady=10)
+
+btn_prev = Button(pagination_frame, text="Previous", state="disabled", command=previous_page)
+btn_prev.grid(row=0, column=0, padx=10)
+
+btn_next = Button(pagination_frame, text="Next", state="disabled", command=next_page)
+btn_next.grid(row=0, column=1, padx=10)
+
+# Start the Tkinter main loop
+root.mainloop()
